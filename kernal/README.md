@@ -1,142 +1,238 @@
-# Kernal Folder Guide
+# Kernel Folder — Complete Beginner Guide
 
-This folder contains the code that runs after the boot sector has already:
+This folder contains the code that runs AFTER the boot sector has done its job.
 
-- loaded the kernel into memory
-- switched to 32-bit protected mode
-- jumped to the kernel entry point
+At the point this code starts running:
+- the CPU is in 32-bit protected mode
+- the kernel binary has been loaded into memory at address 4096
+- the boot sector has jumped to that address
 
-The folder name is spelled `kernal` in this project, so the documentation keeps that same spelling.
+Now it is the kernel's turn to run.
 
-## Main Goal Of This Folder
+---
 
-This folder proves that the bootloader succeeded.
+## What This Folder Contains
 
-It does that by:
+| File | Language | Job |
+|------|----------|-----|
+| `kernal_entry.asm` | Assembly | First instruction that runs in the kernel |
+| `kernal_entry.c` | C | Main kernel function — runs screen demo |
 
-1. starting a tiny 32-bit kernel entry
-2. calling a C function
-3. writing directly to VGA text memory
+---
 
-If you see the character `X` on the screen, it means the chain worked.
+## Execution Flow
 
-## Kernel Flow Chart
-
-```text
-boot sector calls address 4096
+```
+Boot sector calls address 4096
    |
    v
 kernal_entry.asm starts
+(this is the first bytes at address 4096)
    |
    v
-call main
+[extern main]    — tells assembler: main() lives in a C file
+call main        — call the C function
    |
    v
-kernal_entry.c main()
+kernal_entry.c — main() runs
+   |
+   +--> clear_screen()
+   |
+   +--> kprint_at("X", 1, 6)            prints X at column 1, row 6
+   |
+   +--> kprint_at("This text...", 75, 10)  prints near right edge of row 10
+   |
+   +--> kprint_at("There is a line\nbreak", 0, 20)   prints at col 0, row 20
+   |
+   +--> kprint("There is a line\nbreak")   continues from cursor
+   |
+   +--> kprint_at("What happens when we run out of space?", 45, 24)
    |
    v
-point to VGA memory 753664
+main() returns
    |
    v
-write character X
-   |
-   v
-screen shows X
+kernal_entry.asm: jmp $
+CPU loops forever (halted safely)
 ```
 
-## Execution Order
+---
 
-### `kernal_entry.asm`
+## File: `kernal_entry.asm` — The Bridge Between Boot and C
 
-This file runs first inside the kernel.
+### Why does this file exist?
 
-It does:
+The boot sector is assembly.
+It does `call KERNAL_OFFSET` which jumps to address 4096 and executes raw machine code there.
 
-1. `call main`
-2. `jmp $`
+C code compiled into a binary can't just start executing from its first byte.
+C needs:
+- a clean register state
+- a valid stack (already set up by the boot sector)
+- someone to actually call `main()`
 
-Plain English:
+So this tiny assembly file is the first thing at address 4096.
+Its only job is to call `main()` and then halt.
 
-- ask the CPU to run the C function `main`
-- if `main` ever returns, stop progress and loop forever
+### Line-by-line
 
-Why this file exists:
+```asm
+[bits 32]
+```
+The CPU is in 32-bit protected mode when this runs.
+Tell the assembler to generate 32-bit instructions.
 
-C code does not magically start on its own in a freestanding kernel.
-An assembly entry point is needed first.
+```asm
+[extern main]
+```
+Tell the assembler: there is a function called `main` that we did NOT define in this file.
+It exists in another file (the C file `kernal_entry.c`).
+The linker will connect the `call main` below to the actual C function during the build.
 
-### `kernal_entry.c`
+```asm
+call main
+```
+Call the C function `main`.
+The CPU:
+1. pushes the return address (address of the next instruction) onto the stack
+2. jumps to wherever `main` is located in memory
 
-This file contains the function `main`.
+The C compiler generated code for `main` and placed it somewhere in the binary.
+The linker found it and connected this `call` to that location.
 
-Right now the code is extremely small:
+```asm
+jmp $
+```
+If `main` ever returns (which it should not in a kernel), halt here forever.
+`$` means "the address of this instruction."
+So `jmp $` is an infinite loop at this exact spot.
+This prevents the CPU from running into whatever garbage comes after in memory.
 
-- it points to VGA text memory at address `753664`
-- it writes the character `X`
+---
 
-That means the kernel is not using a library to print.
-It is writing directly to display memory.
+## File: `kernal_entry.c` — The C Kernel
 
-## File-Wise Notes
+### Why freestanding C?
 
-### `kernal_entry.asm`
+This C code is compiled with `-ffreestanding`.
+That means:
 
-Concepts shown:
+- there is NO standard library (`stdio.h`, `stdlib.h`, etc. don't exist here)
+- there is NO `printf`
+- there is NO `malloc`
+- there is NO operating system doing things behind the scenes
 
-- external symbol declaration with `extern main`
-- calling a C function from assembly
-- halting progress with an infinite loop
+Everything this kernel can do, it must implement itself.
 
-### `kernal_entry.c`
+That is why the `drivers/` folder exists — to provide basic screen and port functions
+from scratch.
 
-Concepts shown:
+### The `main()` function
 
-- freestanding C
-- direct memory access with a pointer
-- hardware-level output without an operating system
+```c
+#include "../drivers/screen/screen.h"
+```
+Include the screen driver header so we can use `clear_screen`, `kprint_at`, and `kprint`.
 
-### `simple_program.c`
+```c
+void main() {
+```
+Return type is `void` because there is nothing to return to.
+No OS is waiting for an exit code.
 
-Your editor tab list mentioned this file, but it is not currently present in the repository.
-So it is not part of the current build output.
+```c
+    clear_screen();
+```
+Write space characters to every cell in VGA memory.
+Reset the cursor to position 0,0 (top-left).
+This wipes whatever the boot sector printed.
 
-## Important Concepts Explained
+```c
+    kprint_at("X", 1, 6);
+```
+Print the letter X at column 1, row 6.
+Arguments: `kprint_at(string, col, row)`.
+This is just a test to prove we can place text at specific coordinates.
 
-### Why call C from assembly?
+```c
+    kprint_at("This text spans multiple lines", 75, 10);
+```
+Print starting at column 75, row 10.
+The screen is only 80 columns wide.
+Starting at column 75 means only 5 characters fit on that row ("This " barely fits).
+The rest wraps to the next row starting at column 0.
+This demonstrates what happens when text hits the right edge.
 
-The CPU only understands machine instructions.
-Assembly is the first simple layer above that.
+```c
+    kprint_at("There is a line\nbreak", 0, 20);
+```
+Print at column 0, row 20.
+The `\n` inside the string is a newline character.
+The screen driver handles it by moving to the start of the next row.
+So "There is a line" appears on row 20, and "break" appears on row 21.
 
-The bootloader jumps into raw code at a fixed memory address.
-The tiny assembly entry file creates a clean handoff into C.
+```c
+    kprint("There is a line\nbreak");
+```
+`kprint` (without `_at`) prints at the current cursor position.
+The cursor is wherever the previous print left it — right after "break" on row 21.
+So this continues from there: "breakThere is a line" on row 21, then "break" on row 22.
 
-### Why write to memory instead of using `printf`?
+```c
+    kprint_at("What happens when we run out of space?", 45, 24);
+```
+Print at column 45, row 24.
+Row 24 is the last row (rows go from 0 to 24).
+Starting at column 45 means only 35 characters fit.
+The string is 38 characters — the last few don't fit and the screen driver shows an error 'E'
+in red at the bottom-right to signal the overflow.
 
-Because this project does not have:
+---
 
-- an operating system below it
-- a console driver
-- a C runtime
-- a standard output stream
+## Important Concept: Direct Memory Access for Printing
 
-So the kernel must touch hardware memory directly.
+In a normal desktop program you call `printf("hello")`.
+Behind the scenes, the OS, C runtime, and terminal driver do the actual work.
 
-### Why does `main` return type not behave like a normal desktop program?
+Here there is no OS.
+So this kernel talks directly to the VGA chip by writing to memory address 753664.
 
-This is not a normal hosted C program.
-There is no operating system waiting to receive an exit code.
+The screen is 80 columns wide × 25 rows tall = 2000 cells.
+Each cell = 2 bytes: one for the character, one for the color.
 
-This is a freestanding environment.
-The code is responsible for everything itself.
+To calculate where a cell is in memory:
+
+```
+offset = (row × 80 + col) × 2
+memory address = 753664 + offset
+```
+
+Example — to write 'H' in white at column 5, row 3:
+
+```
+offset = (3 × 80 + 5) × 2 = (240 + 5) × 2 = 490
+address = 753664 + 490 = 754154
+memory[754154] = 72      (ASCII 'H')
+memory[754155] = 15      (white on black color)
+```
+
+This is exactly what `print_char` inside `screen.c` does.
+
+---
 
 ## What Success Looks Like
 
-If the whole project works:
+When this kernel runs correctly in QEMU you see:
 
-1. the boot sector starts
-2. the screen messages appear
-3. protected mode is entered
-4. the kernel runs
-5. the top-left VGA cell shows `X`
+```
+(row 6)   X
+(row 10)                                                               This
+(row 11) text spans multiple lines
+(row 20) There is a line
+(row 21) breakThere is a line
+(row 22) break
+(row 24)                                              What happens when we run out of spE
+```
 
-That final `X` is the smallest possible proof that the kernel is alive.
+The `E` in red at the very bottom-right is the overflow marker from the screen driver.
+That is intentional — it shows what happens when you try to print beyond the screen boundary.

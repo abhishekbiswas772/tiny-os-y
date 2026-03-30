@@ -24,7 +24,7 @@ else
 endif
 
 # ── Kernel sources ────────────────────────────────────────────────────────────
-C_SOURCES = $(wildcard kernal/*.c)
+C_SOURCES = $(wildcard kernal/*.c drivers/ports/*.c drivers/screen/*.c)
 C_OBJS    = $(C_SOURCES:.c=.o)
 ASM_ENTRY = kernal/kernal_entry_asm.o   # compiled separately (nasm -f elf32)
 

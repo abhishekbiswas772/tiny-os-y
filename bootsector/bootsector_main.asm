@@ -30,7 +30,7 @@ load_kernal:
     call print
     call print_nl
     mov bx, KERNAL_OFFSET
-    mov dh, 15
+    mov dh, 30
     mov dl, [BOOT_DRIVE]
     call disk_load
     ret

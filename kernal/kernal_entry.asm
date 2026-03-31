@@ -1,5 +1,5 @@
 [bits 32]
-[extern main]   ; main() is defined in kernal_entry.c
+[extern kernel_main]
 
-call main       ; call the C kernel entry point
-jmp $           ; halt if main ever returns
+call kernel_main
+jmp $

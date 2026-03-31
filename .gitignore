@@ -13,3 +13,4 @@ kernal/*.o
 
 # Temporary/debug files
 *.log
+build/

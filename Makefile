@@ -23,18 +23,26 @@ else
   ARCH_RUN  :=
 endif
 
+# ── Build directory ───────────────────────────────────────────────────────────
+BUILD = build
+
 # ── Kernel sources ────────────────────────────────────────────────────────────
-C_SOURCES = $(wildcard kernal/*.c kernal/utils/*.c drivers/ports/*.c drivers/screen/*.c)
-C_OBJS    = $(C_SOURCES:.c=.o)
-ASM_ENTRY = kernal/kernal_entry_asm.o   # compiled separately (nasm -f elf32)
+C_SOURCES = $(wildcard kernal/*.c kernal/libc/*.c drivers/ports/*.c drivers/screen/*.c drivers/keyboard/*.c cpu/idt/*.c cpu/isr/*.c cpu/timer/*.c)
+C_OBJS    = $(addprefix $(BUILD)/,$(notdir $(C_SOURCES:.c=.o)))
+ASM_ENTRY = $(BUILD)/kernal_entry_asm.o
+ASM_INTERRUPT = $(BUILD)/interrupt_asm.o
 
 CFLAGS = -g -ffreestanding -m32
 
 # ── Output files ──────────────────────────────────────────────────────────────
-BOOTSECT = bootsector/bootsector.bin
-KERNEL   = kernal/kernal.bin
-KERNEL_ELF = kernal/kernal.elf
-OS_IMAGE = os-image.bin
+BOOTSECT     = $(BUILD)/bootsector.bin
+KERNEL       = $(BUILD)/kernal.bin
+KERNEL_ELF   = $(BUILD)/kernal.elf
+OS_IMAGE     = os-image.bin
+ISO_IMAGE    = os-image.iso
+ISO_ROOT     = $(BUILD)/iso_root
+ISO_BOOT_IMG = os-image-1.44M.img
+MKISOFS_BIN  = $(shell command -v xorriso >/dev/null 2>&1 && echo "xorriso" || command -v mkisofs >/dev/null 2>&1 && echo "mkisofs" || command -v genisoimage >/dev/null 2>&1 && echo "genisoimage")
 
 BOOT_DEPS = bootsector/bootsector_print.asm \
             bootsector/bootsector_print_hex.asm \
@@ -60,37 +68,70 @@ MPC_PREFIX  ?= /opt/homebrew/opt/libmpc
 
 
 # ── Default target ────────────────────────────────────────────────────────────
-.PHONY: all run debug clean cross-compiler binutils gcc
+.PHONY: all iso run run-iso debug clean cross-compiler binutils gcc
 
-all: $(OS_IMAGE)
+all: $(OS_IMAGE) $(ISO_IMAGE)
+
+iso: $(ISO_IMAGE)
 
 # Concatenate bootsector + kernel into one bootable image
 $(OS_IMAGE): $(BOOTSECT) $(KERNEL)
 	cat $^ > $@
 
+# Bootable ISO (El Torito, floppy emulation) that embeds a padded raw image
+$(ISO_IMAGE): $(OS_IMAGE) | $(BUILD)
+	@rm -rf $(ISO_ROOT)
+	@mkdir -p $(ISO_ROOT)
+	dd if=$(OS_IMAGE) of=$(BUILD)/$(ISO_BOOT_IMG) bs=1474560 conv=sync status=none
+	cp $(BUILD)/$(ISO_BOOT_IMG) $(ISO_ROOT)/$(ISO_BOOT_IMG)
+	@if [ -z "$(MKISOFS_BIN)" ]; then \
+		echo "ERROR: Need xorriso, mkisofs, or genisoimage to create $(ISO_IMAGE)."; \
+		echo "Install one (e.g. brew install xorriso) and re-run make."; \
+		exit 1; \
+	fi
+	@if [ "$(MKISOFS_BIN)" = "xorriso" ]; then \
+		$(MKISOFS_BIN) -as mkisofs -o $@ -V KERNAL_OS -b $(ISO_BOOT_IMG) -c boot.cat $(ISO_ROOT); \
+	else \
+		$(MKISOFS_BIN) -o $@ -V KERNAL_OS -b $(ISO_BOOT_IMG) -c boot.cat $(ISO_ROOT); \
+	fi
+
 # Bootsector binary
-$(BOOTSECT): bootsector/bootsector_main.asm $(BOOT_DEPS)
+$(BOOTSECT): bootsector/bootsector_main.asm $(BOOT_DEPS) | $(BUILD)
 	$(ASM) -f bin -I bootsector/ $< -o $@
 
 # Kernel binary (flat binary for loading at 0x1000)
-$(KERNEL): $(ASM_ENTRY) $(C_OBJS)
+$(KERNEL): $(ASM_ENTRY) $(ASM_INTERRUPT) $(C_OBJS)
 	$(LD) -o $@ -Ttext 0x1000 --entry=0x1000 $^ --oformat binary
 
 # Kernel ELF (keeps debug symbols, used by gdb)
-$(KERNEL_ELF): $(ASM_ENTRY) $(C_OBJS)
+$(KERNEL_ELF): $(ASM_ENTRY) $(ASM_INTERRUPT) $(C_OBJS)
 	$(LD) -o $@ -Ttext 0x1000 --entry=0x1000 $^
 
 # Compile ASM kernel entry with ELF output (not bin)
-$(ASM_ENTRY): kernal/kernal_entry.asm
+$(ASM_ENTRY): kernal/kernal_entry.asm | $(BUILD)
 	$(ASM) $< -f elf32 -o $@
 
-# Compile C sources with cross-compiler
-%.o: %.c
-	$(CC) $(CFLAGS) -c $< -o $@
+# Compile ISR stubs with ELF output
+$(ASM_INTERRUPT): cpu/interrupt.asm | $(BUILD)
+	$(ASM) $< -f elf32 -o $@
+
+# Generate a flat compile rule for every C source file
+define compile_rule
+$(BUILD)/$(notdir $(1:.c=.o)): $(1) | $(BUILD)
+	$(CC) $(CFLAGS) -c $$< -o $$@
+endef
+$(foreach src,$(C_SOURCES),$(eval $(call compile_rule,$(src))))
+
+# Create build directory
+$(BUILD):
+	mkdir -p $(BUILD)
 
 # ── Run & Debug ───────────────────────────────────────────────────────────────
 run: $(OS_IMAGE)
 	$(QEMU) -drive format=raw,file=$(OS_IMAGE),if=floppy
+
+run-iso: $(ISO_IMAGE)
+	$(QEMU) -cdrom $(ISO_IMAGE) -boot d
 
 debug: $(OS_IMAGE) $(KERNEL_ELF)
 	$(QEMU) -s -drive format=raw,file=$(OS_IMAGE),if=floppy &
@@ -101,7 +142,7 @@ debug: $(OS_IMAGE) $(KERNEL_ELF)
 
 # ── Clean ─────────────────────────────────────────────────────────────────────
 clean:
-	rm -f $(OS_IMAGE) $(BOOTSECT) $(KERNEL) $(KERNEL_ELF) $(ASM_ENTRY) $(C_OBJS) kernal/*.o
+	rm -rf $(BUILD) $(OS_IMAGE) $(ISO_IMAGE)
 
 # ── Cross-compiler: binutils → GCC ───────────────────────────────────────────
 cross-compiler: binutils gcc

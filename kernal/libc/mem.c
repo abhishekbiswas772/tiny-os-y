@@ -12,8 +12,10 @@ void memory_set(u8 *dest, u8 val, u32 len) {
 }
 
 /* Simple bump allocator.
- * Kernel loads at 0x1000; heap starts at 0x10000. */
-static u32 free_mem_addr = 0x10000;
+ * Heap starts well above the kernel image.
+ * GRUB loads at 0x100000, custom bootloader at 0x1000.
+ * 0x200000 (2 MB) is safe for both paths. */
+static u32 free_mem_addr = 0x200000;
 
 u32 kmalloc(u32 size, int align, u32 *phys_addr) {
     if (align && (free_mem_addr & 0xFFFFF000)) {

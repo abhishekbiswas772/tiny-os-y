@@ -53,3 +53,24 @@ int strcmp(char s1[], char s2[]) {
         if (s1[i] == '\0') return 0;
     return s1[i] - s2[i];
 }
+
+char* k_strcpy(char *dest, const char *src) {
+    char *orig = dest;
+    while (*src) {
+        *dest++ = *src++;
+    }
+    *dest = '\0';
+    return orig;
+}
+
+char* k_strcat(char *dest, const char *src) {
+    char *orig = dest;
+    while (*dest) {
+        dest++;
+    }
+    while (*src) {
+        *dest++ = *src++;
+    }
+    *dest = '\0';
+    return orig;
+}

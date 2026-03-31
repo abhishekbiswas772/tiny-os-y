@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "additionalDirectories": [
+      "/Users/abhishek/Desktop/Kernal/drivers"
+    ],
+    "allow": [
+      "Bash(make grub:*)"
+    ]
+  }
+}

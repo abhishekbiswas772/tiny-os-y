@@ -3,12 +3,16 @@
 #include "../../drivers/screen/screen.h"
 #include "../../drivers/ports/ports.h"
 #include "../../kernal/libc/string.h"
+#include "../../kernal/libc/mem.h"
 #include "../../cpu/timer/timer.h"
 #include "../../drivers/keyboard/keyboard.h"
 
 isr_t interrupt_handlers[256];
 
 void isr_install() {
+    /* Zero out all handlers to prevent stale pointer calls */
+    memory_set((u8 *)interrupt_handlers, 0, sizeof(interrupt_handlers));
+
     set_idt_gate(0,  (u32)isr0);  set_idt_gate(1,  (u32)isr1);
     set_idt_gate(2,  (u32)isr2);  set_idt_gate(3,  (u32)isr3);
     set_idt_gate(4,  (u32)isr4);  set_idt_gate(5,  (u32)isr5);
